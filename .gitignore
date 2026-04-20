@@ -1,0 +1,8 @@
+credentials.json
+token.json
+token_calendar.json
+.env
+__pycache__/
+*.pyc
+logs/
+state/learned_vips.json
