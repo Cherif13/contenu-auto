@@ -150,7 +150,7 @@ def main():
     logger.info(f"Labels prêts : {list(label_ids.keys())}")
 
     # Construction de la requête
-    query = "in:inbox"
+    query = "in:inbox is:unread"
     if args.days > 0:
         cutoff  = datetime.utcnow() - timedelta(days=args.days)
         query  += f" after:{cutoff.strftime('%Y/%m/%d')}"

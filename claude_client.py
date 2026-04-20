@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 import urllib.request
 import urllib.error
 
@@ -10,7 +11,7 @@ import config
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-1.5-flash"
+GEMINI_MODEL = "gemini-2.0-flash"
 GEMINI_URL   = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 SYSTEM_CONTEXT = """Tu es l'assistant mail de Chérif Nouredine, RSSI et Responsable Informatique à l'AFPOLS (organisme de formation logement social, ~50 collaborateurs, infrastructure 100% cloud, rattaché à l'USH).
@@ -25,7 +26,7 @@ Contexte métier :
 Tu réponds UNIQUEMENT en JSON valide sans texte autour, sauf quand on te demande du HTML."""
 
 
-def _call_gemini(prompt: str, max_tokens: int = 4096) -> str:
+def _call_gemini(prompt: str, max_tokens: int = 4096, retries: int = 3) -> str:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY manquant dans le fichier .env")
@@ -36,17 +37,29 @@ def _call_gemini(prompt: str, max_tokens: int = 4096) -> str:
         "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.3},
     }).encode("utf-8")
 
-    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except urllib.error.HTTPError as e:
-        logger.error(f"Erreur Gemini {e.code}: {e.read().decode()}")
-        return ""
-    except Exception as e:
-        logger.error(f"Erreur Gemini: {e}")
-        return ""
+    for attempt in range(retries):
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode()
+            if e.code == 429:
+                if attempt + 1 >= retries:
+                    logger.error("Gemini indisponible après plusieurs tentatives.")
+                    return ""
+                wait = 60 * (attempt + 1)
+                logger.warning(f"Quota Gemini atteint, attente {wait}s (tentative {attempt+1}/{retries})...")
+                time.sleep(wait)
+            else:
+                logger.error(f"Erreur Gemini {e.code}: {error_body}")
+                return ""
+        except Exception as e:
+            logger.error(f"Erreur Gemini: {e}")
+            return ""
+    logger.error("Gemini indisponible après plusieurs tentatives.")
+    return ""
 
 
 def _clean_json(raw: str) -> str:
@@ -87,7 +100,11 @@ def classify_mails(mails: list) -> list:
         [{"id": m["id"], "from": m["from"], "subject": m["subject"], "snippet": m["snippet"]} for m in mails],
         ensure_ascii=False, indent=2
     )
-    raw = _call_gemini(CLASSIFICATION_PROMPT.format(mails_json=mails_json))
+    raw = _call_gemini(CLASSIFICATION_PROMPT.format(mails_json=mails_json), retries=1)
+    if not raw:
+        logger.warning("Gemini indisponible — classification locale par défaut.")
+        return [{"id": m["id"], "priority": "a_traiter", "category": "autre",
+                 "draft_needed": False, "reason": "Quota Gemini atteint"} for m in mails]
     try:
         return json.loads(_clean_json(raw))
     except json.JSONDecodeError:
@@ -134,8 +151,29 @@ def generate_briefing(date, periode, agenda, urgents, a_traiter, informationnels
         a_traiter_json=json.dumps(a_traiter[:10], ensure_ascii=False, indent=2),
         info_json=json.dumps([{"from": m.get("from"), "subject": m.get("subject")} for m in informationnels[:10]], ensure_ascii=False),
     )
-    result = _call_gemini(prompt, max_tokens=4096)
-    return result or "<p>Erreur génération briefing.</p>"
+    result = _call_gemini(prompt, max_tokens=4096, retries=1)
+    return result or _fallback_briefing(date, periode, urgents, a_traiter, informationnels)
+
+
+def _fallback_briefing(date, periode, urgents, a_traiter, informationnels) -> str:
+    def rows(mails):
+        html = ""
+        for m in mails:
+            html += f"<tr><td style='padding:6px 10px;border-bottom:1px solid #eee'><b>{m.get('from','')}</b></td><td style='padding:6px 10px;border-bottom:1px solid #eee'>{m.get('subject','')}</td></tr>"
+        return html or "<tr><td colspan='2' style='padding:6px 10px;color:#888'>Aucun</td></tr>"
+
+    return f"""<html><body style='font-family:Arial,sans-serif;max-width:700px;margin:auto'>
+<div style='background:#1a1a2e;color:#fff;padding:20px;border-radius:8px 8px 0 0'>
+  <h1 style='margin:0'>🌅 Briefing matin — {date}</h1>
+  <p style='margin:5px 0 0;opacity:.8'>{periode} | {len(urgents)} urgent(s) · {len(a_traiter)} à traiter · {len(informationnels)} info</p>
+</div>
+<div style='padding:20px'>
+  <h2 style='color:#cc3a21'>🔴 Urgents ({len(urgents)})</h2>
+  <table style='width:100%;border-collapse:collapse'>{rows(urgents)}</table>
+  <h2 style='color:#e6a817;margin-top:24px'>🟡 À traiter ({len(a_traiter)})</h2>
+  <table style='width:100%;border-collapse:collapse'>{rows(a_traiter[:15])}</table>
+  <p style='color:#888;font-size:12px;margin-top:20px'>Briefing généré sans IA (quota Gemini atteint)</p>
+</div></body></html>"""
 
 
 DRAFT_PROMPT = """Rédige un brouillon de réponse professionnel pour ce mail.

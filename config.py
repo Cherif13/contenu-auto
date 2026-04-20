@@ -108,15 +108,15 @@ NEWSLETTER_DOMAINS = [
 # ─── Labels Gmail à créer ────────────────────────────────────────────────────
 LABELS = {
     "urgent":        {"name": "🔴 Urgent",         "color": {"textColor": "#ffffff", "backgroundColor": "#cc3a21"}},
-    "a_traiter":     {"name": "🟡 À traiter",       "color": {"textColor": "#594c05", "backgroundColor": "#ffd6a2"}},
-    "peut_attendre": {"name": "🟢 Peut attendre",   "color": {"textColor": "#0b4f30", "backgroundColor": "#b9e4d0"}},
-    "en_attente":    {"name": "⏳ En attente",       "color": {"textColor": "#1a73e8", "backgroundColor": "#c2e7ff"}},
-    "reference":     {"name": "📚 Référence",        "color": {"textColor": "#444444", "backgroundColor": "#e8eaed"}},
-    "newsletters":   {"name": "📰 Newsletters",      "color": {"textColor": "#444444", "backgroundColor": "#f1f3f4"}},
-    "notifications": {"name": "🔔 Notifications",    "color": {"textColor": "#444444", "backgroundColor": "#f1f3f4"}},
-    "equipe":        {"name": "👥 Équipe",           "color": {"textColor": "#41236d", "backgroundColor": "#d0bcf1"}},
-    "clients":       {"name": "🤝 Partenaires",      "color": {"textColor": "#7a2e0b", "backgroundColor": "#ffd2a8"}},
-    "secu":          {"name": "🔒 Sécurité",         "color": {"textColor": "#ffffff", "backgroundColor": "#8b0000"}},
+    "a_traiter":     {"name": "🟡 À traiter",       "color": {"textColor": "#000000", "backgroundColor": "#ffd6a2"}},
+    "peut_attendre": {"name": "🟢 Peut attendre",   "color": {"textColor": "#000000", "backgroundColor": "#b9e4d0"}},
+    "en_attente":    {"name": "⏳ En attente",       "color": {"textColor": "#ffffff", "backgroundColor": "#3c78d8"}},
+    "reference":     {"name": "📚 Référence",        "color": {"textColor": "#000000", "backgroundColor": "#efefef"}},
+    "newsletters":   {"name": "📰 Newsletters",      "color": {"textColor": "#000000", "backgroundColor": "#efefef"}},
+    "notifications": {"name": "🔔 Notifications",    "color": {"textColor": "#000000", "backgroundColor": "#efefef"}},
+    "equipe":        {"name": "👥 Équipe",           "color": {"textColor": "#ffffff", "backgroundColor": "#41236d"}},
+    "clients":       {"name": "🤝 Partenaires",      "color": {"textColor": "#000000", "backgroundColor": "#ffd6a2"}},
+    "secu":          {"name": "🔒 Sécurité",         "color": {"textColor": "#ffffff", "backgroundColor": "#ac2b16"}},
 }
 
 # ─── Archivage automatique ────────────────────────────────────────────────────
