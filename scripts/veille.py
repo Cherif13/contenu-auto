@@ -64,6 +64,7 @@ HIBP_BREACHES     = "https://haveibeenpwned.com/api/v3/breaches"
 # ── Veille IA & Évolutions ────────────────────────────────────────────────────
 IA_RSS_SOURCES = [
     ("OpenAI",        "https://openai.com/blog/rss.xml"),
+    ("Anthropic",     "https://www.anthropic.com/rss.xml"),
     ("MIT Tech AI",   "https://www.technologyreview.com/topic/artificial-intelligence/feed"),
     ("AI News",       "https://www.artificialintelligence-news.com/feed/"),
     ("ZDNet FR",      "https://www.zdnet.fr/feeds/rss/actualites/"),
@@ -83,10 +84,12 @@ IA_EVOL_KEYWORDS = [
     "salesforce einstein", "copilot", "chatgpt", "gpt-5", "gpt-4",
     "llm", "intelligence artificielle", "ia generative", "generative ai",
     "new model", "nouveau modele", "openai", "gemini", "claude",
+    "anthropic", "claude 3", "claude 4", "sonnet", "opus", "haiku",
     "hugging face", "machine learning", "ai tool", "outil ia",
     "automatisation", "workflow ai", "agent ia", "ai agent",
     "microsoft ai", "google ai", "ai update", "mise a jour ia",
-    "formation ia", "ai formation",
+    "formation ia", "ai formation", "mistral", "llama", "deepseek",
+    "perplexity", "grok", "xai",
 ]
 
 # Union pour le filtre global
@@ -99,7 +102,7 @@ CVSS_THRESHOLD = 7.0
 # ─── Traduction FR ────────────────────────────────────────────────────────────
 
 # Sources en anglais → toujours traduire
-EN_SOURCES = {"OpenAI", "MIT Tech AI", "AI News"}
+EN_SOURCES = {"OpenAI", "Anthropic", "MIT Tech AI", "AI News"}
 
 def _translate_to_fr(text: str, max_chars: int = 500) -> str:
     """Traduit un texte en français via Google Translate (gratuit, sans clé)."""
@@ -767,12 +770,16 @@ def _ia_col(items: list, title: str, color: str, empty_msg: str) -> str:
         for i in items[:6]:
             src_label = f"<span style='font-size:10px;color:#888'>[{i['source']}]</span> " if i.get('source') else ""
             link = i.get('link', '')
+            link_part = (
+                f"<a href='{link}' style='font-size:13px;color:#1a73e8;font-weight:600;"
+                f"text-decoration:underline;line-height:1.4'>{i['title']}</a>"
+                f"&nbsp;<a href='{link}' style='font-size:11px;color:#888;text-decoration:none'>↗</a>"
+            ) if link else f"<span style='font-size:13px;font-weight:600'>{i['title']}</span>"
             html += (
                 f"<div style='padding:7px 4px;border-bottom:1px solid #f5f5f5'>"
                 f"<div style='font-size:11px;color:#999;margin-bottom:2px'>"
                 f"{i.get('pub_date','')[:10]} &nbsp; {src_label}</div>"
-                f"<a href='{link}' style='font-size:13px;color:#1a1a2e;font-weight:600;"
-                f"text-decoration:none;line-height:1.4'>{i['title']}</a>"
+                f"{link_part}"
                 f"<div style='font-size:12px;color:#666;margin-top:3px'>{i['summary'][:130]}...</div>"
                 f"</div>"
             )
@@ -999,6 +1006,7 @@ def generate_html(data: dict, analysis: dict, date_label: str) -> str:
         "<a href='https://nvd.nist.gov/vuln/search' style='color:#1a73e8;margin-right:14px'>NVD CVE</a>"
         "<a href='https://trust.salesforce.com/' style='color:#1a73e8;margin-right:14px'>Salesforce Trust</a>"
         "<a href='https://openai.com/blog' style='color:#10a37f;margin-right:14px'>OpenAI</a>"
+        "<a href='https://www.anthropic.com/news' style='color:#cc6b00;margin-right:14px'>Anthropic</a>"
         "<a href='https://haveibeenpwned.com/DomainSearch' style='color:#cc3a21;margin-right:14px'>HIBP</a>"
         "<a href='https://www.silicon.fr/' style='color:#6c5ce7'>Silicon.fr</a>"
         "</div>"
@@ -1010,7 +1018,7 @@ def generate_html(data: dict, analysis: dict, date_label: str) -> str:
         f"<div style='background:#e8eaed;padding:10px 24px;border-radius:0 0 8px 8px;"
         f"font-size:11px;color:#888;text-align:center'>"
         f"Veille auto RSSI AFPOLS &nbsp;&bull;&nbsp; CERT-FR &middot; NVD &middot; HIBP"
-        f" &middot; Salesforce &middot; OpenAI &middot; MIT &middot; ZDNet &middot; Silicon.fr"
+        f" &middot; Salesforce &middot; OpenAI &middot; Anthropic &middot; MIT &middot; ZDNet &middot; Silicon.fr"
         f" &nbsp;&bull;&nbsp; {datetime.now(tz=timezone.utc).strftime('%d/%m/%Y %H:%M UTC')}"
         f"</div></body></html>"
     )
