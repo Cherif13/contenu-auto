@@ -142,3 +142,18 @@ BATCH_SIZE          = 20    # mails envoyés par lot à Claude
 # ─── Mode dry-run ─────────────────────────────────────────────────────────────
 # True = simulation sans modifier la boîte mail (idéal pour tester)
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
+
+# ─── Anti-spam ────────────────────────────────────────────────────────────────
+# Nombre d'archivages avant blocage automatique de l'expéditeur
+SPAM_LEARN_THRESHOLD = 3
+
+# ─── Relances urgents ─────────────────────────────────────────────────────────
+# Délai en heures avant de signaler un urgent sans réponse
+RELANCE_HOURS = 24
+
+# ─── Briefing audio ───────────────────────────────────────────────────────────
+# True = générer et attacher un MP3 au briefing matin
+AUDIO_BRIEFING = True
+
+# ─── Fichiers d'état ─────────────────────────────────────────────────────────
+SPAM_FILE = "state/spam_senders.json"

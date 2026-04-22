@@ -132,7 +132,10 @@ Informationnels (résumé) :
 
 Génère un email HTML avec :
 1. En-tête coloré professionnel
-2. Section URGENTS (expéditeur, objet, résumé 1 phrase, "✍️ Brouillon préparé" si applicable)
+2. Section URGENTS — pour CHAQUE mail urgent, affiche :
+   - Expéditeur et objet en gras
+   - Exactement 3 bullet points résumant l'essentiel du mail (utilise le champ "body" s'il est disponible, sinon le "snippet")
+   - "✍️ Brouillon préparé" si draft_needed est true
 3. Agenda du jour
 4. To-do list priorisée avec temps estimés
 5. Liste compacte des "à traiter"
@@ -156,7 +159,28 @@ def generate_briefing(date, periode, agenda, urgents, a_traiter, informationnels
 
 
 def _fallback_briefing(date, periode, urgents, a_traiter, informationnels) -> str:
-    def rows(mails):
+    def urgent_rows(mails):
+        html = ""
+        for m in mails:
+            snippet_text = m.get("snippet", "")
+            # Préfère le body s'il est disponible et non vide
+            preview = m.get("body") or snippet_text
+            preview = preview[:300] if preview else ""
+            draft_badge = " &nbsp;<span style='color:#1a73e8;font-size:12px'>✍️ Brouillon préparé</span>" if m.get("draft_needed") else ""
+            html += (
+                f"<tr>"
+                f"<td style='padding:8px 10px;border-bottom:1px solid #fdd;vertical-align:top'>"
+                f"<b>{m.get('from','')}</b><br>"
+                f"<span style='color:#333'>{m.get('subject','')}</span>{draft_badge}"
+                f"</td>"
+                f"<td style='padding:8px 10px;border-bottom:1px solid #fdd;color:#555;font-size:13px;vertical-align:top'>"
+                f"{preview}"
+                f"</td>"
+                f"</tr>"
+            )
+        return html or "<tr><td colspan='2' style='padding:6px 10px;color:#888'>Aucun urgent</td></tr>"
+
+    def simple_rows(mails):
         html = ""
         for m in mails:
             html += f"<tr><td style='padding:6px 10px;border-bottom:1px solid #eee'><b>{m.get('from','')}</b></td><td style='padding:6px 10px;border-bottom:1px solid #eee'>{m.get('subject','')}</td></tr>"
@@ -169,9 +193,15 @@ def _fallback_briefing(date, periode, urgents, a_traiter, informationnels) -> st
 </div>
 <div style='padding:20px'>
   <h2 style='color:#cc3a21'>🔴 Urgents ({len(urgents)})</h2>
-  <table style='width:100%;border-collapse:collapse'>{rows(urgents)}</table>
+  <table style='width:100%;border-collapse:collapse;background:#fff8f8'>
+    <thead><tr>
+      <th style='padding:8px 10px;text-align:left;width:40%'>Expéditeur / Objet</th>
+      <th style='padding:8px 10px;text-align:left'>Aperçu</th>
+    </tr></thead>
+    <tbody>{urgent_rows(urgents)}</tbody>
+  </table>
   <h2 style='color:#e6a817;margin-top:24px'>🟡 À traiter ({len(a_traiter)})</h2>
-  <table style='width:100%;border-collapse:collapse'>{rows(a_traiter[:15])}</table>
+  <table style='width:100%;border-collapse:collapse'>{simple_rows(a_traiter[:15])}</table>
   <p style='color:#888;font-size:12px;margin-top:20px'>Briefing généré sans IA (quota Gemini atteint)</p>
 </div></body></html>"""
 

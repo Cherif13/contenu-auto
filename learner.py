@@ -85,6 +85,42 @@ def is_learned_vip(from_field: str) -> bool:
     return any(vip in email or email in vip for vip in vips)
 
 
+def record_archived_sender(sender_email: str):
+    """
+    Incrémente le compteur d'archivages pour un expéditeur dans spam_senders.json.
+    Quand le compteur atteint SPAM_LEARN_THRESHOLD, l'expéditeur est marqué spam.
+    """
+    path = config.SPAM_FILE
+    data = _load(path)
+    email = _extract_email(sender_email)
+    if email not in data:
+        data[email] = {"count": 0, "blocked": False, "last_archived": None}
+    data[email]["count"] += 1
+    data[email]["last_archived"] = datetime.utcnow().isoformat()
+    threshold = getattr(config, "SPAM_LEARN_THRESHOLD", 3)
+    if data[email]["count"] >= threshold and not data[email]["blocked"]:
+        data[email]["blocked"] = True
+        logger.info(f"Expéditeur marqué spam auto (archivé {data[email]['count']}x) : {email}")
+    _save(path, data)
+
+
+def get_spam_senders() -> list:
+    """
+    Retourne la liste des adresses email archivées SPAM_LEARN_THRESHOLD fois ou plus.
+    """
+    path = config.SPAM_FILE
+    data = _load(path)
+    threshold = getattr(config, "SPAM_LEARN_THRESHOLD", 3)
+    return [email for email, info in data.items() if info.get("count", 0) >= threshold]
+
+
+def is_spam_sender(from_field: str) -> bool:
+    """Vérifie si un expéditeur est dans la liste spam apprise."""
+    email = _extract_email(from_field)
+    spammers = get_spam_senders()
+    return any(sp in email or email in sp for sp in spammers)
+
+
 def get_stats() -> dict:
     """Retourne les statistiques d'apprentissage."""
     data = _load(config.LEARN_FILE)

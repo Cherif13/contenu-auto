@@ -1,0 +1,43 @@
+name: Routine Mail AFPOLS
+
+on:
+  schedule:
+    - cron: '0 6 * * 1-5'    # Veille IT 8h00 Paris (6h UTC)
+    - cron: '30 6 * * 1-5'
+    - cron: '30 11 * * 1-5'
+    - cron: '0 16 * * 1-5'
+    - cron: '30 15 * * 5'
+  workflow_dispatch:
+
+jobs:
+  run-routine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Installer dépendances
+        run: pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client python-dotenv edge-tts
+      - name: Préparer credentials
+        run: |
+          echo "${{ secrets.GOOGLE_CREDENTIALS }}" | base64 -d > credentials.json
+          echo "${{ secrets.GOOGLE_TOKEN }}" | base64 -d > token.json
+          echo "${{ secrets.GOOGLE_TOKEN_CAL }}" | base64 -d > token_calendar.json
+          echo "EMAIL_PRO=${{ secrets.EMAIL_PRO }}" > .env
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+      - name: Veille IT
+        if: github.event.schedule == '0 6 * * 1-5'
+        run: python scripts/veille.py
+      - name: Briefing matin
+        if: github.event.schedule == '30 6 * * 1-5'
+        run: python scripts/briefing_matin.py
+      - name: Point midi
+        if: github.event.schedule == '30 11 * * 1-5'
+        run: python scripts/point_midi.py
+      - name: Débrief soir
+        if: github.event.schedule == '0 16 * * 1-5'
+        run: python scripts/debrief_soir.py
+      - name: Rapport hebdomadaire
+        if: github.event.schedule == '30 15 * * 5'
+        run: python scripts/rapport_hebdo.py

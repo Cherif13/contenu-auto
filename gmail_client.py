@@ -1,12 +1,15 @@
 """Wrapper Gmail API — authentification OAuth2 + opérations courantes."""
 
 import os
+import io
 import json
 import base64
 import logging
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -102,12 +105,67 @@ def list_messages(service, query: str, max_results: int = 500) -> list:
     return messages
 
 
-def get_message_details(service, msg_id: str) -> dict:
-    """Récupère les détails d'un message (objet, expéditeur, snippet, date)."""
+def _extract_body_from_payload(payload: dict, max_chars: int = 2000) -> str:
+    """Extrait le texte brut (text/plain) d'un payload Gmail (simple ou multipart)."""
+    text = ""
     try:
-        msg = service.users().messages().get(userId="me", id=msg_id, format="metadata",
-                                              metadataHeaders=["From", "To", "Subject", "Date"]).execute()
+        mime_type = payload.get("mimeType", "")
+        parts     = payload.get("parts", [])
+
+        if mime_type == "text/plain":
+            data = payload.get("body", {}).get("data", "")
+            if data:
+                text = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+
+        elif mime_type == "text/html" and not text:
+            # fallback HTML si pas de text/plain trouvé
+            data = payload.get("body", {}).get("data", "")
+            if data:
+                raw = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+                # strip tags basique
+                import re
+                text = re.sub(r"<[^>]+>", " ", raw)
+
+        elif parts:
+            for part in parts:
+                part_type = part.get("mimeType", "")
+                if part_type == "text/plain":
+                    data = part.get("body", {}).get("data", "")
+                    if data:
+                        text = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+                        break
+                elif part_type.startswith("multipart/"):
+                    # récursion sur parties imbriquées
+                    sub_text = _extract_body_from_payload(part, max_chars)
+                    if sub_text:
+                        text = sub_text
+                        break
+            # si toujours pas de text/plain, essayer text/html
+            if not text:
+                for part in parts:
+                    if part.get("mimeType", "") == "text/html":
+                        data = part.get("body", {}).get("data", "")
+                        if data:
+                            import re
+                            raw = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+                            text = re.sub(r"<[^>]+>", " ", raw)
+                            break
+    except Exception as e:
+        logger.debug(f"Erreur extraction corps: {e}")
+
+    # Nettoyage et troncature
+    text = " ".join(text.split())  # normalise les espaces/retours
+    return text[:max_chars]
+
+
+def get_message_details(service, msg_id: str) -> dict:
+    """Récupère les détails d'un message (objet, expéditeur, snippet, corps, date)."""
+    try:
+        msg = service.users().messages().get(
+            userId="me", id=msg_id, format="full"
+        ).execute()
         headers = {h["name"]: h["value"] for h in msg["payload"]["headers"]}
+        body = _extract_body_from_payload(msg["payload"], max_chars=2000)
         return {
             "id": msg_id,
             "thread_id": msg.get("threadId"),
@@ -116,6 +174,7 @@ def get_message_details(service, msg_id: str) -> dict:
             "to": headers.get("To", ""),
             "date": headers.get("Date", ""),
             "snippet": msg.get("snippet", ""),
+            "body": body,
             "label_ids": msg.get("labelIds", []),
             "timestamp": msg.get("internalDate"),
         }
@@ -223,3 +282,74 @@ def send_briefing(service, subject: str, body_html: str):
         logger.info(f"Briefing envoyé : {subject}")
     except HttpError as e:
         logger.error(f"Erreur envoi briefing: {e}")
+
+
+# ─── Briefing avec audio MP3 ──────────────────────────────────────────────────
+
+def send_briefing_with_audio(service, subject: str, body_html: str, audio_text: str):
+    """
+    Génère un MP3 via ElevenLabs (voix naturelle) à partir de audio_text,
+    l'attache au mail HTML de briefing et l'envoie.
+    Bascule sur send_briefing() si ElevenLabs échoue.
+    """
+    if not getattr(config, "AUDIO_BRIEFING", True):
+        logger.info("AUDIO_BRIEFING désactivé — envoi sans MP3")
+        send_briefing(service, subject, body_html)
+        return
+
+    audio_bytes = None
+    try:
+        import asyncio
+        import tempfile
+        import edge_tts
+        # Voix française naturelle Microsoft Neural (gratuite)
+        voice = "fr-FR-DeniseNeural"
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp_path = tmp.name
+        async def _gen():
+            communicate = edge_tts.Communicate(audio_text, voice)
+            await communicate.save(tmp_path)
+        asyncio.run(_gen())
+        with open(tmp_path, "rb") as f:
+            audio_bytes = f.read()
+        os.unlink(tmp_path)
+        logger.info("MP3 généré avec edge-tts (voix Denise, Microsoft Neural)")
+    except Exception as e:
+        logger.warning(f"Erreur edge-tts: {e} — envoi sans audio")
+
+    if not audio_bytes:
+        send_briefing(service, subject, body_html)
+        return
+
+    try:
+        msg = MIMEMultipart("mixed")
+        msg["To"]      = config.NOTIF_EMAIL
+        msg["From"]    = config.EMAIL_PRO
+        msg["Subject"] = subject
+
+        # Partie HTML
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(body_html, "html"))
+        msg.attach(alt)
+
+        # Partie audio MP3
+        audio_part = MIMEBase("audio", "mpeg")
+        audio_part.set_payload(audio_bytes)
+        encoders.encode_base64(audio_part)
+        from datetime import date
+        filename = f"briefing_{date.today().strftime('%Y%m%d')}.mp3"
+        audio_part.add_header("Content-Disposition", "attachment", filename=filename)
+        msg.attach(audio_part)
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+        if config.DRY_RUN:
+            logger.info(f"[DRY-RUN] Briefing audio simulé : {subject}")
+            return
+
+        service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        logger.info(f"Briefing avec audio envoyé : {subject}")
+
+    except Exception as e:
+        logger.error(f"Erreur envoi briefing audio: {e} — tentative sans audio")
+        send_briefing(service, subject, body_html)
