@@ -64,7 +64,7 @@ HIBP_BREACHES     = "https://haveibeenpwned.com/api/v3/breaches"
 # ── Veille IA & Évolutions ────────────────────────────────────────────────────
 IA_RSS_SOURCES = [
     ("OpenAI",        "https://openai.com/blog/rss.xml"),
-    ("Anthropic",     "https://www.anthropic.com/rss.xml"),
+    ("The Verge AI",  "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml"),
     ("MIT Tech AI",   "https://www.technologyreview.com/topic/artificial-intelligence/feed"),
     ("AI News",       "https://www.artificialintelligence-news.com/feed/"),
     ("ZDNet FR",      "https://www.zdnet.fr/feeds/rss/actualites/"),
@@ -102,7 +102,7 @@ CVSS_THRESHOLD = 7.0
 # ─── Traduction FR ────────────────────────────────────────────────────────────
 
 # Sources en anglais → toujours traduire
-EN_SOURCES = {"OpenAI", "Anthropic", "MIT Tech AI", "AI News"}
+EN_SOURCES = {"OpenAI", "The Verge AI", "MIT Tech AI", "AI News"}
 
 def _translate_to_fr(text: str, max_chars: int = 500) -> str:
     """Traduit un texte en français via Google Translate (gratuit, sans clé)."""
@@ -1006,7 +1006,7 @@ def generate_html(data: dict, analysis: dict, date_label: str) -> str:
         "<a href='https://nvd.nist.gov/vuln/search' style='color:#1a73e8;margin-right:14px'>NVD CVE</a>"
         "<a href='https://trust.salesforce.com/' style='color:#1a73e8;margin-right:14px'>Salesforce Trust</a>"
         "<a href='https://openai.com/blog' style='color:#10a37f;margin-right:14px'>OpenAI</a>"
-        "<a href='https://www.anthropic.com/news' style='color:#cc6b00;margin-right:14px'>Anthropic</a>"
+        "<a href='https://www.theverge.com/ai-artificial-intelligence' style='color:#cc6b00;margin-right:14px'>The Verge AI</a>"
         "<a href='https://haveibeenpwned.com/DomainSearch' style='color:#cc3a21;margin-right:14px'>HIBP</a>"
         "<a href='https://www.silicon.fr/' style='color:#6c5ce7'>Silicon.fr</a>"
         "</div>"
@@ -1018,7 +1018,7 @@ def generate_html(data: dict, analysis: dict, date_label: str) -> str:
         f"<div style='background:#e8eaed;padding:10px 24px;border-radius:0 0 8px 8px;"
         f"font-size:11px;color:#888;text-align:center'>"
         f"Veille auto RSSI AFPOLS &nbsp;&bull;&nbsp; CERT-FR &middot; NVD &middot; HIBP"
-        f" &middot; Salesforce &middot; OpenAI &middot; Anthropic &middot; MIT &middot; ZDNet &middot; Silicon.fr"
+        f" &middot; Salesforce &middot; OpenAI &middot; The Verge AI &middot; MIT &middot; ZDNet &middot; Silicon.fr"
         f" &nbsp;&bull;&nbsp; {datetime.now(tz=timezone.utc).strftime('%d/%m/%Y %H:%M UTC')}"
         f"</div></body></html>"
     )
