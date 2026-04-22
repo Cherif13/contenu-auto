@@ -70,14 +70,27 @@ IA_RSS_SOURCES = [
     ("Silicon.fr",    "https://www.silicon.fr/feed"),
 ]
 
-# Mots-clés IA pertinents pour AFPOLS (Salesforce Einstein, Copilot, sécurité IA…)
-IA_KEYWORDS = [
-    "salesforce einstein", "copilot", "microsoft 365", "chatgpt", "gpt",
-    "llm", "intelligence artificielle", "ia générative", "generative ai",
-    "deepfake", "phishing ia", "ai security", "artificial intelligence",
-    "formation", "automatisation", "workflow ai", "agent ia", "openai",
-    "gemini", "claude", "hugging face", "machine learning",
+# Mots-clés sécurité IA (menaces, attaques IA)
+IA_SECU_KEYWORDS = [
+    "deepfake", "phishing ia", "ai security", "prompt injection",
+    "jailbreak", "ai attack", "llm security", "model poisoning",
+    "adversarial", "ai threat", "ai fraud", "ai malware",
+    "cybersecurity ai", "ai vulnerability", "securite ia",
 ]
+
+# Mots-clés évolutions IA (nouveautés, outils, mises à jour)
+IA_EVOL_KEYWORDS = [
+    "salesforce einstein", "copilot", "chatgpt", "gpt-5", "gpt-4",
+    "llm", "intelligence artificielle", "ia generative", "generative ai",
+    "new model", "nouveau modele", "openai", "gemini", "claude",
+    "hugging face", "machine learning", "ai tool", "outil ia",
+    "automatisation", "workflow ai", "agent ia", "ai agent",
+    "microsoft ai", "google ai", "ai update", "mise a jour ia",
+    "formation ia", "ai formation",
+]
+
+# Union pour le filtre global
+IA_KEYWORDS = IA_SECU_KEYWORDS + IA_EVOL_KEYWORDS
 
 NVD_KEYWORDS   = ["Salesforce", "ESET", "Cisco Meraki", "Microsoft 365", "Conga"]
 CVSS_THRESHOLD = 7.0
@@ -413,13 +426,17 @@ def fetch_m365_status() -> list[dict]:
 
 # ─── Source 7 : Veille IA & Évolutions ───────────────────────────────────────
 
-def fetch_ia_news() -> list[dict]:
+def fetch_ia_news() -> dict:
     """
-    Agrège les flux RSS IA (OpenAI, MIT, ZDNet FR, Silicon.fr, AI News),
-    filtre sur les mots-clés pertinents pour AFPOLS et les 48h.
+    Agrège les flux RSS IA et les classe en deux catégories :
+    - "secu" : menaces IA (deepfake, prompt injection, AI attacks)
+    - "evol" : évolutions IA (nouveaux modèles, outils, mises à jour)
+    Retourne {"secu": [...], "evol": [...]}
     """
-    all_items = []
+    secu_items = []
+    evol_items = []
     cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=48)
+    seen_titles = set()
 
     for source_name, url in IA_RSS_SOURCES:
         logger.info(f"Fetching IA RSS — {source_name}...")
@@ -430,7 +447,7 @@ def fetch_ia_news() -> list[dict]:
         items = _parse_rss(raw)
 
         for item in items:
-            # Filtre date (48h pour les sources IA — actualité plus lente)
+            # Filtre date 48h
             pub = item.get("pub_date", "")
             if pub:
                 try:
@@ -441,34 +458,34 @@ def fetch_ia_news() -> list[dict]:
                     if dt < cutoff:
                         continue
                 except Exception:
-                    pass  # date non parseable → on garde
+                    pass
 
-            # Filtre mots-clés IA pertinents pour AFPOLS
-            text_check = (
-                item.get("title", "") + " " + item.get("summary", "")
-            ).lower()
-            if not any(kw in text_check for kw in IA_KEYWORDS):
+            text_check = (item.get("title", "") + " " + item.get("summary", "")).lower()
+
+            # Dédoublonnage
+            title_key = item.get("title", "").lower()[:80]
+            if title_key in seen_titles:
                 continue
+            seen_titles.add(title_key)
 
-            all_items.append({
+            entry = {
                 "source":   source_name,
                 "title":    item["title"],
                 "link":     item["link"],
-                "summary":  item["summary"][:400],
-                "pub_date": item["pub_date"],
-            })
+                "summary":  item["summary"][:300],
+                "pub_date": item["pub_date"][:16] if item.get("pub_date") else "",
+            }
 
-    # Dédoublonnage par titre (même actu reprise par plusieurs sources)
-    seen_titles = set()
-    deduped = []
-    for it in all_items:
-        key = it["title"].lower()[:80]
-        if key not in seen_titles:
-            seen_titles.add(key)
-            deduped.append(it)
+            is_secu = any(kw in text_check for kw in IA_SECU_KEYWORDS)
+            is_evol = any(kw in text_check for kw in IA_EVOL_KEYWORDS)
 
-    logger.info(f"Veille IA : {len(deduped)} article(s) pertinent(s) sur 48h")
-    return deduped[:15]  # max 15 articles
+            if is_secu:
+                secu_items.append(entry)
+            elif is_evol:
+                evol_items.append(entry)
+
+    logger.info(f"Veille IA : {len(secu_items)} secu / {len(evol_items)} evol sur 48h")
+    return {"secu": secu_items[:8], "evol": evol_items[:8]}
 
 
 # ─── Collecte globale ─────────────────────────────────────────────────────────
@@ -482,7 +499,7 @@ def collect_all_data() -> dict:
         "hibp":           fetch_hibp(),
         "salesforce":     fetch_salesforce_status(),
         "m365":           fetch_m365_status(),
-        "ia_news":        fetch_ia_news(),
+        "ia_news":        fetch_ia_news(),   # dict {"secu": [...], "evol": [...]}
         "collected_at":   datetime.now(tz=timezone.utc).isoformat(),
     }
 
@@ -524,7 +541,8 @@ def analyze_with_gemini(data: dict) -> dict | None:
         "hibp_breaches":    data["hibp"],
         "sf_incidents":     data["salesforce"],
         "m365_issues":      data["m365"],
-        "ia_news":          data.get("ia_news", [])[:8],
+        "ia_secu":          data.get("ia_news", {}).get("secu", [])[:5],
+        "ia_evol":          data.get("ia_news", {}).get("evol", [])[:5],
     }
     prompt = VEILLE_PROMPT.format(
         data_json=json.dumps(summary, ensure_ascii=False, indent=2)
@@ -571,7 +589,8 @@ def _fallback_analysis(data: dict) -> dict:
     elif nb_certfr or nb_high:
         niveau = "MODÉRÉ"
 
-    nb_ia = len(data.get("ia_news", []))
+    ia = data.get("ia_news", {})
+    nb_ia = len(ia.get("secu", [])) + len(ia.get("evol", []))
     return {
         "resume_top": f"{nb_certfr} alerte(s) CERT-FR · {nb_crit} CVE critique(s) · {nb_sf} incident(s) Salesforce. Niveau de risque : {niveau}. Analyse IA indisponible (quota Gemini).",
         "points_critiques": bullets,
@@ -581,7 +600,7 @@ def _fallback_analysis(data: dict) -> dict:
             "Consulter NVD pour les CVE identifiées sur la stack",
             "Valider l'état des sauvegardes OwnBackup",
         ],
-        "ia_opportunites": [f"{nb_ia} article(s) IA détecté(s) — consulter la section ci-dessous"] if nb_ia else [],
+        "ia_opportunites": [f"{nb_ia} article(s) IA détecté(s) — {len(ia.get('secu',[]))} sécurité / {len(ia.get('evol',[]))} évolutions"] if nb_ia else [],
         "amelioration_infra": "Analyse IA indisponible (quota Gemini atteint). Veuillez consulter manuellement les sources référencées.",
         "niveau_risque_global": niveau,
     }
@@ -660,25 +679,76 @@ def _service_status_row(inc: dict) -> str:
     )
 
 
-def _ia_card(item: dict) -> str:
-    colors = {
-        "OpenAI": "#10a37f", "MIT Tech AI": "#a31f34",
-        "AI News": "#2563eb", "ZDNet FR": "#e84118", "Silicon.fr": "#6c5ce7",
-    }
-    color    = colors.get(item["source"], "#555")
-    link_html = (
-        f"<a href='{item['link']}' style='color:{color};font-size:12px'>Lire l'article</a>"
-        if item.get("link") else ""
+def _compact_cve_rows(cves: list) -> str:
+    """Tableau CVE compact : 1 ligne = 1 CVE."""
+    if not cves:
+        return ""
+    rows = ""
+    for c in cves:
+        score = c["cvss_score"]
+        color = "#cc3a21" if score >= 9.0 else "#e6a817"
+        rows += (
+            f"<tr>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;font-family:monospace;font-size:13px;white-space:nowrap'>"
+            f"<a href='{c['link']}' style='color:#1a73e8'>{c['cve_id']}</a></td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;color:#444'>{c['description'][:180]}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:center;white-space:nowrap'>"
+            f"<b style='color:{color}'>{score:.1f}</b></td>"
+            f"</tr>"
+        )
+    return rows
+
+
+def _compact_alert_rows(items: list, max_items: int = 6) -> str:
+    """Liste CERT-FR compacte : titre + lien en 1 ligne."""
+    rows = ""
+    for i in items[:max_items]:
+        date_str = i.get("pub_date", "")[:11]
+        source_color = "#cc3a21" if i.get("source", "").startswith("CERT-FR") else "#555"
+        rows += (
+            f"<tr>"
+            f"<td style='padding:5px 10px;border-bottom:1px solid #f0f0f0;font-size:12px;"
+            f"color:#888;white-space:nowrap;width:90px'>{date_str}</td>"
+            f"<td style='padding:5px 10px;border-bottom:1px solid #f0f0f0;font-size:13px'>"
+            f"<span style='color:{source_color};font-size:10px;font-weight:bold;margin-right:5px'>"
+            f"{i.get('source','')}</span>"
+            f"<a href='{i.get('link','')}' style='color:#333;text-decoration:none'>{i['title']}</a>"
+            f"</td></tr>"
+        )
+    if len(items) > max_items:
+        rows += (
+            f"<tr><td colspan='2' style='padding:5px 10px;font-size:12px;color:#888;font-style:italic'>"
+            f"+ {len(items) - max_items} autre(s) alerte(s) — <a href='https://www.cert.ssi.gouv.fr/' style='color:#1a73e8'>voir CERT-FR</a>"
+            f"</td></tr>"
+        )
+    return rows
+
+
+def _ia_col(items: list, title: str, color: str, empty_msg: str) -> str:
+    """Colonne IA (sécu ou évol) pour le layout 2 colonnes."""
+    html = (
+        f"<div style='flex:1;min-width:280px'>"
+        f"<div style='background:{color};color:#fff;padding:8px 12px;"
+        f"border-radius:6px 6px 0 0;font-weight:bold;font-size:13px'>{title}</div>"
+        f"<div style='border:1px solid #e0e0e0;border-top:none;border-radius:0 0 6px 6px;padding:8px'>"
     )
-    return (
-        f"<div style='border-left:4px solid {color};padding:10px 14px;"
-        f"margin-bottom:10px;background:#fafafa;border-radius:0 6px 6px 0'>"
-        f"<div style='font-size:11px;color:{color};font-weight:bold;margin-bottom:4px'>"
-        f"{item['source']} &mdash; {item.get('pub_date','')[:16]}</div>"
-        f"<div style='font-weight:600;margin-bottom:4px'>{item['title']}</div>"
-        f"<div style='font-size:13px;color:#555;margin-bottom:6px'>{item['summary'][:200]}</div>"
-        f"{link_html}</div>"
-    )
+    if not items:
+        html += f"<p style='color:#888;font-size:13px;margin:8px 4px'>{empty_msg}</p>"
+    else:
+        for i in items[:6]:
+            src_label = f"<span style='font-size:10px;color:#888'>[{i['source']}]</span> " if i.get('source') else ""
+            link = i.get('link', '')
+            html += (
+                f"<div style='padding:7px 4px;border-bottom:1px solid #f5f5f5'>"
+                f"<div style='font-size:11px;color:#999;margin-bottom:2px'>"
+                f"{i.get('pub_date','')[:10]} &nbsp; {src_label}</div>"
+                f"<a href='{link}' style='font-size:13px;color:#1a1a2e;font-weight:600;"
+                f"text-decoration:none;line-height:1.4'>{i['title']}</a>"
+                f"<div style='font-size:12px;color:#666;margin-top:3px'>{i['summary'][:130]}...</div>"
+                f"</div>"
+            )
+    html += "</div></div>"
+    return html
 
 
 def generate_html(data: dict, analysis: dict, date_label: str) -> str:
@@ -689,11 +759,13 @@ def generate_html(data: dict, analysis: dict, date_label: str) -> str:
     sf_incidents  = data["salesforce"]
     m365_issues   = data["m365"]
     hibp_breaches = data["hibp"]
-    ia_news       = data.get("ia_news", [])
+    ia            = data.get("ia_news", {})
+    ia_secu       = ia.get("secu", []) if isinstance(ia, dict) else []
+    ia_evol       = ia.get("evol", []) if isinstance(ia, dict) else []
+    nb_ia         = len(ia_secu) + len(ia_evol)
 
     nb_critiques   = len(cves_critical) + len(hibp_breaches)
     nb_importantes = len(cves_high) + len(certfr_items) + len(sf_incidents) + len(m365_issues)
-    nb_ia          = len(ia_news)
 
     niveau       = analysis.get("niveau_risque_global", "FAIBLE")
     header_color = SEVERITY_COLORS.get(niveau, ("#1a1a2e", "#fff", "#333"))[0]
@@ -701,216 +773,216 @@ def generate_html(data: dict, analysis: dict, date_label: str) -> str:
     if ras_mode:
         header_color = "#137333"
 
-    # ── Resume en tete ───────────────────────────────────────────────────────
+    # ── Résumé 10 secondes ───────────────────────────────────────────────────
     resume_text = analysis.get("resume_top", "")
     if not resume_text:
         if ras_mode:
-            resume_text = "Aucune alerte critique. Tous les services sont operationnels. RAS."
+            resume_text = "RAS — Aucune alerte critique. Stack AFPOLS operationnelle."
         else:
             parts = []
-            if nb_critiques:   parts.append(f"{nb_critiques} alerte(s) critique(s)")
+            if nb_critiques:   parts.append(f"{nb_critiques} critique(s)")
             if cves_high:      parts.append(f"{len(cves_high)} CVE importante(s)")
             if certfr_items:   parts.append(f"{len(certfr_items)} alerte(s) CERT-FR")
             if sf_incidents:   parts.append(f"{len(sf_incidents)} incident(s) Salesforce")
             resume_text = " — ".join(parts) + f". Risque : {niveau}."
 
     statuts = [
-        ("CVE Crit.",  "🔴" if cves_critical else "🟢", str(len(cves_critical))),
-        ("CVE Htes",   "🟠" if cves_high     else "🟢", str(len(cves_high))),
+        ("CVE 9+",     "🔴" if cves_critical else "🟢", str(len(cves_critical))),
+        ("CVE 7-9",    "🟠" if cves_high     else "🟢", str(len(cves_high))),
         ("CERT-FR",    "🟠" if certfr_items  else "🟢", str(len(certfr_items))),
         ("HIBP",       "🔴" if hibp_breaches else "🟢", "BREACH!" if hibp_breaches else "OK"),
         ("Salesforce", "🟠" if sf_incidents  else "🟢", f"{len(sf_incidents)} inc."),
-        ("Veille IA",  "🔵",                            f"{nb_ia} art."),
+        ("IA Secu",    "🟠" if ia_secu       else "🟢", str(len(ia_secu))),
+        ("IA Evol",    "🔵",                            str(len(ia_evol))),
     ]
     statuts_html = "".join(
-        f"<td style='padding:10px 12px;text-align:center;border-right:1px solid rgba(255,255,255,.15)'>"
-        f"<div style='font-size:18px'>{ico}</div>"
-        f"<div style='font-size:10px;color:#ccc;margin-top:2px'>{label}</div>"
+        f"<td style='padding:8px 10px;text-align:center;border-right:1px solid rgba(255,255,255,.12)'>"
+        f"<div style='font-size:16px'>{ico}</div>"
+        f"<div style='font-size:9px;color:#bbb;margin-top:1px;text-transform:uppercase'>{label}</div>"
         f"<div style='font-size:13px;font-weight:bold;color:#fff'>{val}</div></td>"
         for label, ico, val in statuts
     )
 
-    # ── Blocs HTML ───────────────────────────────────────────────────────────
-    ia_opps_html = "".join(
-        f"<li style='margin-bottom:5px'>{o}</li>"
-        for o in analysis.get("ia_opportunites", [])
-    ) or "<li style='color:#888'>Analyse IA indisponible. Consulter la section ci-dessous.</li>"
-
-    bullets_html = "".join(
-        f"<li style='margin-bottom:6px'>{b}</li>"
-        for b in analysis.get("points_critiques", [])
-    )
-    impacts_html = "".join(
-        f"<div style='margin-bottom:10px;padding:10px;background:#f8f9fa;"
-        f"border-radius:6px;border-left:3px solid #1a73e8'>"
-        f"<b style='color:#1a73e8'>{imp.get('alerte','')}</b><br>"
-        f"<span style='font-size:13px;color:#444'>{imp.get('impact','')}</span></div>"
-        for imp in analysis.get("analyse_impacts", [])
-    ) or "<p style='color:#888;font-size:13px'>Aucun impact specifique identifie.</p>"
+    # ── Actions Gemini ───────────────────────────────────────────────────────
     actions_html = "".join(
-        f"<li style='margin-bottom:6px'>{a}</li>"
+        f"<span style='display:inline-block;background:#f0f4ff;border:1px solid #c9d9f5;"
+        f"border-radius:4px;padding:4px 10px;margin:3px;font-size:12px;color:#333'>{a}</span>"
         for a in analysis.get("actions_semaine", [])
-    )
+    ) or "<span style='font-size:13px;color:#888'>Verifier CERT-FR &middot; Valider sauvegardes OwnBackup &middot; Consulter NVD</span>"
 
-    cve_crit_rows = "".join(_cve_row(c) for c in cves_critical) or (
-        "<tr><td colspan='4' style='padding:10px;color:#137333;text-align:center'>"
-        "OK - Aucun CVE critique detecte</td></tr>"
-    )
-    cve_high_rows = "".join(_cve_row(c) for c in cves_high) or (
-        "<tr><td colspan='4' style='padding:10px;color:#137333;text-align:center'>"
-        "OK - Aucun CVE haute severite detecte</td></tr>"
-    )
-    rss_certfr_html = "".join(_rss_card(i) for i in certfr_items) or (
-        "<p style='color:#137333'>OK Aucune alerte CERT-FR dans les 24 dernieres heures.</p>"
-    )
-    rss_anssi_html = "".join(_rss_card(i) for i in anssi_items) or (
-        "<p style='color:#888'>Aucun avis CERT-FR dans les 24 dernieres heures.</p>"
-    )
+    ia_opps_html = "".join(
+        f"<li style='margin-bottom:4px;font-size:13px'>{o}</li>"
+        for o in analysis.get("ia_opportunites", [])
+    ) or "<li style='font-size:13px;color:#888'>Analyse Gemini indisponible — consulter la section IA ci-dessous.</li>"
 
-    hibp_html = ""
-    if hibp_breaches:
-        for b in hibp_breaches:
-            classes = ", ".join(b.get("data_classes", [])) or "N/A"
-            hibp_html += (
-                f"<div style='background:#fff0f0;border:2px solid #cc3a21;"
-                f"border-radius:8px;padding:14px;margin-bottom:10px'>"
-                f"<b style='color:#cc3a21'>BREACH : {b['name']}</b> &mdash; {b['breach_date']}<br>"
-                f"<span style='font-size:13px'>{b['description']}</span><br>"
-                f"<span style='font-size:12px;color:#555'>Donnees : {classes}</span></div>"
-            )
+    # ── CVE compact ──────────────────────────────────────────────────────────
+    all_cves = cves_critical + cves_high
+    cve_block = ""
+    if all_cves:
+        cve_rows = _compact_cve_rows(all_cves)
+        cve_block = (
+            "<table style='width:100%;border-collapse:collapse;font-size:13px;margin-bottom:4px'>"
+            "<thead style='background:#f8f8f8'><tr>"
+            "<th style='padding:6px 10px;text-align:left;width:130px'>CVE</th>"
+            "<th style='padding:6px 10px;text-align:left'>Description</th>"
+            "<th style='padding:6px 10px;text-align:center;width:55px'>Score</th>"
+            f"</tr></thead><tbody>{cve_rows}</tbody></table>"
+        )
     else:
-        hibp_html = "<p style='color:#137333'>OK Aucune breach afpols.fr dans HIBP.</p>"
+        cve_block = "<p style='color:#137333;font-size:13px;margin:4px 0'>OK Aucun CVE critique ou haute severite sur la stack AFPOLS.</p>"
 
+    # ── HIBP compact ─────────────────────────────────────────────────────────
+    if hibp_breaches:
+        b = hibp_breaches[0]
+        hibp_block = (
+            f"<div style='background:#fff0f0;border-left:4px solid #cc3a21;padding:8px 12px;"
+            f"border-radius:0 4px 4px 0;font-size:13px'>"
+            f"<b style='color:#cc3a21'>BREACH : {b['name']}</b> ({b['breach_date']}) — "
+            f"{', '.join(b.get('data_classes',[]))[:80]}</div>"
+        )
+    else:
+        hibp_block = "<p style='color:#137333;font-size:13px;margin:4px 0'>OK Aucune breach afpols.fr dans HIBP.</p>"
+
+    # ── Services compact ─────────────────────────────────────────────────────
     all_incidents = sf_incidents + [
         {"source": "M365", "title": s["service"], "status": s["status"]}
         for s in m365_issues
     ]
-    service_rows = "".join(_service_status_row(inc) for inc in all_incidents) or (
-        "<tr><td colspan='3' style='padding:10px;color:#137333;text-align:center'>"
-        "OK Tous les services operationnels</td></tr>"
-    )
-    ia_cards_html = "".join(_ia_card(i) for i in ia_news) or (
-        "<p style='color:#888;font-size:13px'>Aucun article IA pertinent sur les 48 dernieres heures.</p>"
-    )
-    amelioration = analysis.get("amelioration_infra", "")
+    if all_incidents:
+        svc_rows = "".join(
+            f"<tr><td style='padding:5px 10px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#888;width:100px'>{inc.get('source','')}</td>"
+            f"<td style='padding:5px 10px;border-bottom:1px solid #f0f0f0;font-size:13px'>{inc.get('title',inc.get('service',''))}</td>"
+            f"<td style='padding:5px 10px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#cc3a21;font-weight:bold'>{inc.get('status','')}</td>"
+            f"</tr>"
+            for inc in all_incidents
+        )
+        svc_block = (
+            f"<table style='width:100%;border-collapse:collapse'>"
+            f"<tbody>{svc_rows}</tbody></table>"
+        )
+    else:
+        svc_block = "<p style='color:#137333;font-size:13px;margin:4px 0'>OK Salesforce et M365 operationnels.</p>"
 
-    # ── Construction HTML ────────────────────────────────────────────────────
-    table_header = (
-        "<table style='width:100%;border-collapse:collapse;font-size:14px;margin-bottom:16px'>"
-        "<thead style='background:#f5f5f5'><tr>"
-        "<th style='padding:8px 12px;text-align:left;width:15%'>CVE ID</th>"
-        "<th style='padding:8px 12px;text-align:left'>Description</th>"
-        "<th style='padding:8px 12px;text-align:center;width:8%'>Score</th>"
-        "<th style='padding:8px 12px;text-align:left;width:18%'>Produit</th>"
-        "</tr></thead>"
+    # ── CERT-FR compact ──────────────────────────────────────────────────────
+    all_alerts = certfr_items + anssi_items
+    if all_alerts:
+        alert_rows = _compact_alert_rows(all_alerts, max_items=7)
+        alert_block = (
+            f"<table style='width:100%;border-collapse:collapse'>"
+            f"<tbody>{alert_rows}</tbody></table>"
+        )
+    else:
+        alert_block = "<p style='color:#137333;font-size:13px;margin:4px 0'>OK Aucune alerte CERT-FR dans les 24 dernieres heures.</p>"
+
+    # ── Section IA 2 colonnes ─────────────────────────────────────────────────
+    ia_secu_col = _ia_col(
+        ia_secu, "🔐 Securite IA — Menaces & Failles", "#cc3a21",
+        "Aucune menace IA detectee sur les 48h. Surveillance active."
+    )
+    ia_evol_col = _ia_col(
+        ia_evol, "🚀 Evolutions IA — Nouveautes & Outils", "#6c5ce7",
+        "Aucune evolution IA detectee sur les 48h."
     )
 
+    # ────────────────────────────────────────────────────────────────────────
     html  = "<!DOCTYPE html><html lang='fr'><head><meta charset='UTF-8'>"
     html += f"<title>Veille IT AFPOLS {date_label}</title></head>"
-    html += f"<body style='font-family:Arial,sans-serif;max-width:800px;margin:0 auto;background:#f5f5f5;padding:0'>"
+    html += "<body style='font-family:Arial,sans-serif;max-width:800px;margin:0 auto;background:#f0f2f5;padding:0'>"
 
-    # Header couleur risque
+    # HEADER
     html += (
-        f"<div style='background:{header_color};color:#fff;padding:20px 28px;border-radius:8px 8px 0 0'>"
-        f"<h1 style='margin:0;font-size:20px'>Veille IT &amp; Securite AFPOLS &mdash; {date_label}</h1>"
-        f"<p style='margin:5px 0 0;opacity:.85;font-size:13px'>"
-        f"{nb_critiques} critique(s) &nbsp;|&nbsp; {nb_importantes} important(e)s"
-        f" &nbsp;|&nbsp; {nb_ia} actu IA &nbsp;|&nbsp; Risque : {_risk_badge(niveau)}"
-        f"</p></div>"
+        f"<div style='background:{header_color};color:#fff;padding:16px 24px;border-radius:8px 8px 0 0'>"
+        f"<div style='font-size:18px;font-weight:bold'>Veille IT &amp; Securite AFPOLS &mdash; {date_label}</div>"
+        f"<div style='font-size:12px;opacity:.85;margin-top:4px'>"
+        f"{nb_critiques} critique(s) &nbsp;&bull;&nbsp; {nb_importantes} important(e)s"
+        f" &nbsp;&bull;&nbsp; {nb_ia} actu IA &nbsp;&bull;&nbsp; Risque : {_risk_badge(niveau)}"
+        f"</div></div>"
     )
 
-    # RECAP EN TETE — bande noire avec résumé + icônes statut
+    # RECAP 10 SECONDES
     html += (
-        f"<div style='background:#1a1a2e;color:#fff;padding:16px 28px;border-top:3px solid {header_color}'>"
-        f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:1px;opacity:.5;margin-bottom:8px'>"
-        f"Resume du jour &mdash; a lire en 10 secondes</div>"
-        f"<div style='font-size:15px;line-height:1.6;font-weight:500'>{resume_text}</div>"
-        f"<table style='width:100%;margin-top:12px;border-collapse:collapse'>"
-        f"<tr>{statuts_html}</tr></table>"
+        f"<div style='background:#1a1a2e;padding:14px 24px;border-top:3px solid {header_color}'>"
+        f"<div style='font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-bottom:6px'>"
+        f"Resume — a lire en 10 secondes</div>"
+        f"<div style='font-size:14px;color:#fff;font-weight:500;line-height:1.5'>{resume_text}</div>"
+        f"<table style='width:100%;margin-top:10px;border-collapse:collapse'><tr>{statuts_html}</tr></table>"
         f"</div>"
     )
 
-    html += "<div style='background:#fff;padding:24px 28px'>"
+    html += "<div style='background:#fff;padding:20px 24px'>"
 
-    # ALERTES CRITIQUES
+    # ── SECU en 1 tableau compact ────────────────────────────────────────────
     html += (
-        "<h2 style='color:#cc3a21;border-bottom:2px solid #cc3a21;padding-bottom:6px;margin-top:0'>"
-        "ALERTES CRITIQUES (CVE 9.0+ &amp; Breaches)</h2>"
-        "<h3 style='color:#cc3a21;font-size:15px'>CVE Critiques (CVSS 9.0+)</h3>"
-        + table_header + f"<tbody>{cve_crit_rows}</tbody></table>"
-        "<h3 style='color:#cc3a21;font-size:15px'>Have I Been Pwned &mdash; afpols.fr</h3>"
-        + hibp_html
+        "<h2 style='color:#cc3a21;font-size:15px;border-bottom:2px solid #cc3a21;"
+        "padding-bottom:5px;margin-top:0'>SECURITE — CVE &amp; Alertes</h2>"
+        "<div style='display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px'>"
+
+        # CVE block
+        f"<div style='flex:3;min-width:280px'>"
+        f"<div style='font-size:11px;font-weight:bold;color:#cc3a21;margin-bottom:4px;text-transform:uppercase'>CVE Stack AFPOLS</div>"
+        f"{cve_block}</div>"
+
+        # HIBP + Services block
+        f"<div style='flex:2;min-width:200px'>"
+        f"<div style='font-size:11px;font-weight:bold;color:#555;margin-bottom:4px;text-transform:uppercase'>HIBP afpols.fr</div>"
+        f"{hibp_block}"
+        f"<div style='font-size:11px;font-weight:bold;color:#555;margin-top:10px;margin-bottom:4px;text-transform:uppercase'>Services</div>"
+        f"{svc_block}"
+        f"</div>"
+        f"</div>"
+
+        # Alertes CERT-FR compact
+        f"<div style='font-size:11px;font-weight:bold;color:#cc3a21;margin-bottom:4px;text-transform:uppercase'>"
+        f"CERT-FR Alertes &amp; Avis (24h)</div>"
+        f"{alert_block}"
     )
 
-    # ALERTES IMPORTANTES
+    # ── VEILLE IA 2 colonnes ─────────────────────────────────────────────────
     html += (
-        "<h2 style='color:#e6a817;border-bottom:2px solid #e6a817;padding-bottom:6px;margin-top:28px'>"
-        "ALERTES IMPORTANTES (CVE 7.0&ndash;8.9)</h2>"
-        + table_header + f"<tbody>{cve_high_rows}</tbody></table>"
-        "<h3 style='color:#cc3a21;font-size:15px;margin-top:20px'>CERT-FR Alertes 24h</h3>"
-        + rss_certfr_html
-        + "<h3 style='color:#cc3a21;font-size:15px;margin-top:20px'>CERT-FR Avis &mdash; Correctifs 24h</h3>"
-        + rss_anssi_html
+        "<h2 style='color:#6c5ce7;font-size:15px;border-bottom:2px solid #6c5ce7;"
+        "padding-bottom:5px;margin-top:20px'>VEILLE IA &amp; EVOLUTIONS</h2>"
+        f"<div style='display:flex;gap:14px;flex-wrap:wrap'>"
+        f"{ia_secu_col}{ia_evol_col}"
+        f"</div>"
     )
 
-    # ETAT DES SERVICES
+    # ── OPPORTUNITES IA (Gemini) ──────────────────────────────────────────────
     html += (
-        "<h2 style='color:#1a73e8;border-bottom:2px solid #1a73e8;padding-bottom:6px;margin-top:28px'>"
-        "ETAT DES SERVICES</h2>"
-        "<table style='width:100%;border-collapse:collapse;font-size:14px'>"
-        "<thead style='background:#f5f5f5'><tr>"
-        "<th style='padding:8px 12px;text-align:left;width:20%'>Plateforme</th>"
-        "<th style='padding:8px 12px;text-align:left'>Incident / Service</th>"
-        "<th style='padding:8px 12px;text-align:left;width:20%'>Statut</th>"
-        f"</tr></thead><tbody>{service_rows}</tbody></table>"
+        f"<div style='background:#f5f0ff;border-left:4px solid #6c5ce7;padding:10px 14px;"
+        f"border-radius:0 6px 6px 0;margin-top:12px;font-size:13px'>"
+        f"<b style='color:#6c5ce7'>Opportunites IA pour AFPOLS (analyse Gemini) :</b>"
+        f"<ul style='margin:6px 0 0;padding-left:18px;line-height:1.7'>{ia_opps_html}</ul>"
+        f"</div>"
     )
 
-    # VEILLE IA
+    # ── ACTIONS ──────────────────────────────────────────────────────────────
     html += (
-        f"<h2 style='color:#6c5ce7;border-bottom:2px solid #6c5ce7;padding-bottom:6px;margin-top:28px'>"
-        f"VEILLE IA &amp; EVOLUTIONS ({nb_ia} article(s))</h2>"
-        f"<div style='background:#f5f0ff;border-left:4px solid #6c5ce7;padding:12px 16px;"
-        f"border-radius:0 6px 6px 0;margin-bottom:16px;font-size:13px'>"
-        f"<b style='color:#6c5ce7'>Opportunites IA pour AFPOLS :</b>"
-        f"<ul style='margin:6px 0 0;padding-left:18px;line-height:1.7'>{ia_opps_html}</ul></div>"
-        + ia_cards_html
+        "<h2 style='color:#41236d;font-size:15px;border-bottom:2px solid #41236d;"
+        "padding-bottom:5px;margin-top:20px'>ACTIONS DE LA SEMAINE</h2>"
+        f"<div style='margin-bottom:8px'>{actions_html}</div>"
     )
 
-    # ANALYSE & RECO
+    # ── LIENS ────────────────────────────────────────────────────────────────
     html += (
-        "<h2 style='color:#41236d;border-bottom:2px solid #41236d;padding-bottom:6px;margin-top:28px'>"
-        "ANALYSE &amp; RECOMMANDATIONS</h2>"
-        f"<h3 style='font-size:15px;color:#333'>Points cles</h3>"
-        f"<ul style='margin:0 0 16px;padding-left:20px;line-height:1.7'>{bullets_html}</ul>"
-        f"<h3 style='font-size:15px;color:#333'>Impact AFPOLS</h3>{impacts_html}"
-        f"<h3 style='font-size:15px;color:#333'>Actions recommandees</h3>"
-        f"<ul style='margin:0 0 16px;padding-left:20px;line-height:1.7'>{actions_html}</ul>"
-        f"<h3 style='font-size:15px;color:#333'>Suggestion infrastructure</h3>"
-        f"<div style='background:#f0f6ff;border-left:4px solid #1a73e8;padding:12px 16px;"
-        f"border-radius:0 6px 6px 0;font-size:14px;color:#333'>"
-        f"{amelioration or 'Aucune suggestion disponible.'}</div>"
-    )
-
-    # LIENS
-    html += (
-        "<h2 style='color:#555;border-bottom:1px solid #eee;padding-bottom:6px;margin-top:28px'>LIENS</h2>"
-        "<table style='width:100%;font-size:13px'><tr>"
-        "<td style='padding:6px 10px'><a href='https://www.cert.ssi.gouv.fr/' style='color:#1a73e8'>CERT-FR</a></td>"
-        "<td style='padding:6px 10px'><a href='https://nvd.nist.gov/vuln/search' style='color:#1a73e8'>NVD CVE</a></td>"
-        "<td style='padding:6px 10px'><a href='https://trust.salesforce.com/' style='color:#1a73e8'>Salesforce Trust</a></td>"
-        "<td style='padding:6px 10px'><a href='https://openai.com/blog' style='color:#10a37f'>OpenAI</a></td>"
-        "<td style='padding:6px 10px'><a href='https://www.silicon.fr/' style='color:#6c5ce7'>Silicon.fr</a></td>"
-        "</tr></table>"
+        "<div style='border-top:1px solid #eee;margin-top:16px;padding-top:10px;"
+        "font-size:12px;color:#888'>"
+        "<a href='https://www.cert.ssi.gouv.fr/' style='color:#1a73e8;margin-right:14px'>CERT-FR</a>"
+        "<a href='https://nvd.nist.gov/vuln/search' style='color:#1a73e8;margin-right:14px'>NVD CVE</a>"
+        "<a href='https://trust.salesforce.com/' style='color:#1a73e8;margin-right:14px'>Salesforce Trust</a>"
+        "<a href='https://openai.com/blog' style='color:#10a37f;margin-right:14px'>OpenAI</a>"
+        "<a href='https://haveibeenpwned.com/DomainSearch' style='color:#cc3a21;margin-right:14px'>HIBP</a>"
+        "<a href='https://www.silicon.fr/' style='color:#6c5ce7'>Silicon.fr</a>"
+        "</div>"
         "</div>"
     )
 
     # FOOTER
     html += (
-        f"<div style='background:#f0f0f0;padding:12px 28px;border-radius:0 0 8px 8px;"
-        f"font-size:12px;color:#888;text-align:center'>"
-        f"Veille auto RSSI AFPOLS &nbsp;|&nbsp; CERT-FR &middot; NVD &middot; HIBP"
-        f" &middot; Salesforce &middot; OpenAI &middot; ZDNet &middot; Silicon.fr"
-        f" &nbsp;|&nbsp; {datetime.now(tz=timezone.utc).strftime('%d/%m/%Y %H:%M UTC')}"
+        f"<div style='background:#e8eaed;padding:10px 24px;border-radius:0 0 8px 8px;"
+        f"font-size:11px;color:#888;text-align:center'>"
+        f"Veille auto RSSI AFPOLS &nbsp;&bull;&nbsp; CERT-FR &middot; NVD &middot; HIBP"
+        f" &middot; Salesforce &middot; OpenAI &middot; MIT &middot; ZDNet &middot; Silicon.fr"
+        f" &nbsp;&bull;&nbsp; {datetime.now(tz=timezone.utc).strftime('%d/%m/%Y %H:%M UTC')}"
         f"</div></body></html>"
     )
     return html
