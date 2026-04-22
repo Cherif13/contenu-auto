@@ -96,6 +96,33 @@ NVD_KEYWORDS   = ["Salesforce", "ESET", "Cisco Meraki", "Microsoft 365", "Conga"
 CVSS_THRESHOLD = 7.0
 
 
+# ─── Traduction FR ────────────────────────────────────────────────────────────
+
+# Sources en anglais → toujours traduire
+EN_SOURCES = {"OpenAI", "MIT Tech AI", "AI News"}
+
+def _translate_to_fr(text: str, max_chars: int = 500) -> str:
+    """Traduit un texte en français via Google Translate (gratuit, sans clé)."""
+    if not text or not text.strip():
+        return text
+    try:
+        from deep_translator import GoogleTranslator
+        chunk = text[:max_chars].strip()
+        return GoogleTranslator(source="auto", target="fr").translate(chunk) or text
+    except Exception:
+        return text  # fallback silencieux : texte original
+
+
+def _translate_item(item: dict) -> dict:
+    """Traduit title et summary d'un item si la source est anglophone."""
+    if item.get("source") not in EN_SOURCES:
+        return item
+    item = dict(item)  # copie pour ne pas muter l'original
+    item["title"]   = _translate_to_fr(item.get("title", ""), 200)
+    item["summary"] = _translate_to_fr(item.get("summary", ""), 400)
+    return item
+
+
 # ─── Helpers HTTP ─────────────────────────────────────────────────────────────
 
 def _http_get(url: str, headers: dict = None, timeout: int = HTTP_TIMEOUT) -> bytes | None:
@@ -286,7 +313,7 @@ def fetch_nvd_cves() -> list[dict]:
                 "source":      "NVD",
                 "keyword":     keyword,
                 "cve_id":      cve_id,
-                "description": description,
+                "description": _translate_to_fr(description, 400),
                 "cvss_score":  score,
                 "affected":    affected,
                 "link":        f"https://nvd.nist.gov/vuln/detail/{cve_id}",
@@ -475,6 +502,8 @@ def fetch_ia_news() -> dict:
                 "summary":  item["summary"][:300],
                 "pub_date": item["pub_date"][:16] if item.get("pub_date") else "",
             }
+            # Traduction FR pour les sources anglophones
+            entry = _translate_item(entry)
 
             is_secu = any(kw in text_check for kw in IA_SECU_KEYWORDS)
             is_evol = any(kw in text_check for kw in IA_EVOL_KEYWORDS)

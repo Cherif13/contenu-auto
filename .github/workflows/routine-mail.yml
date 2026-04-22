@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Installer dépendances
-        run: pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client python-dotenv edge-tts
+        run: pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client python-dotenv edge-tts deep-translator
       - name: Préparer credentials
         run: |
           echo "${{ secrets.GOOGLE_CREDENTIALS }}" | base64 -d > credentials.json
